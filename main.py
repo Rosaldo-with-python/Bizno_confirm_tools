@@ -157,7 +157,7 @@ if result_df is not None:
         xlsx_bytes = buffer.getvalue()
 
         st.download_button(
-            label="결과 xlsx 다운로드(EUC-KR)",
+            label="결과 xlsx 다운로드",
             data=xlsx_bytes,
             file_name="business_check_results.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -165,3 +165,4 @@ if result_df is not None:
 
 st.markdown("---")
 st.caption("주의: 동시 사용시 충돌 주의 발생 가능")
+

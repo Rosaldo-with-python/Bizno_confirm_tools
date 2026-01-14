@@ -5,7 +5,7 @@ import requests
 import json
 import time
 import re
-
+import io
 st.set_page_config(page_title="사업자 상태조회 배치", layout="wide")
 st.title("국세청 사업자 상태조회 서비스")
 
@@ -33,20 +33,28 @@ def get_service_key():
 # ✅ 사이드바 제거 + 기본값 고정
 batch_size = 100
 throttle = 0.5
-strip_non_digits = True  # "숫자만 추출하여 조회" 기본 ON 고정
+strip_non_digits = True  # 숫자만 추출하여 조회 고정
 
-# (선택) 화면에 현재 고정값 표시
-st.caption(f"설정값 고정됨 • 배치 크기={batch_size} • 요청 대기={throttle}초 • 숫자만 추출={strip_non_digits}")
-
+st.caption(
+    f"설정값 고정됨 • 배치 크기={batch_size} • 요청 대기={throttle}초 • 숫자만 추출={strip_non_digits}"
+)
 
 st.markdown("#### 1) 엑셀 업로드")
 uploaded = st.file_uploader("xlsx만 허용", type=["xlsx"])
 
 
 def sanitize_bno_series(s: pd.Series, digits_only: bool = True) -> pd.Series:
+    """
+    사업자등록번호 컬럼 정리
+    - 문자열 변환 + strip
+    - digits_only=True면 숫자만 남김(하이픈 등 제거)
+    - 빈값 제거
+    """
     s = s.astype(str).str.strip()
+
     if digits_only:
         s = s.apply(lambda x: re.sub(r"\D", "", x))  # 숫자 이외 제거
+
     return s.replace({"": pd.NA}).dropna()
 
 
@@ -87,23 +95,29 @@ def call_api(bno_list, key, batch_size=100, sleep_sec=0.5):
 result_df = None
 
 if uploaded is not None:
-    # ✅ 엑셀 로드/검증(중복 제거)
+    # ✅ 엑셀 로드
     try:
         df = pd.read_excel(uploaded, dtype=str)
     except Exception as e:
         st.error(f"엑셀 로드 실패: {e}")
         st.stop()
 
-    if df.shape[1] < 1:
-        st.error("엑셀의 첫 번째 컬럼에 사업자등록번호 필요")
+    # ✅ 컬럼명 양끝 공백 제거(엑셀에서 '사업자등록번호 ' 이런 케이스 방지)
+    df.columns = df.columns.str.strip()
+
+    # ✅ 첫 번째 컬럼이 아니라 '사업자등록번호' 컬럼 존재 여부로 체크
+    required_col = "사업자등록번호"
+    if required_col not in df.columns:
+        st.error(f"엑셀에 '{required_col}' 컬럼이 필요합니다.")
+        st.write("현재 엑셀 컬럼 목록:", list(df.columns))
         st.stop()
 
     st.markdown("#### 2) 데이터 확인")
     st.write("첫 5행 미리보기")
     st.dataframe(df.head())
 
-    # 첫 컬럼을 사업자번호로 사용
-    bno_series = sanitize_bno_series(df.iloc[:, 0], digits_only=strip_non_digits)
+    # ✅ '사업자등록번호' 컬럼을 사업자번호로 사용하도록 변경
+    bno_series = sanitize_bno_series(df[required_col], digits_only=strip_non_digits)
     business_numbers = bno_series.tolist()
 
     st.info(f"유효 사업자번호 {len(business_numbers)}건 인식")
@@ -137,14 +151,16 @@ if result_df is not None:
         result_df.columns = ["사업자등록번호", "사업자 상태", "과세 유형", "폐업일"]
 
         st.dataframe(result_df.head(50), use_container_width=True)
-
-        csv_bytes = result_df.to_csv(index=False, encoding="euc-kr").encode("euc-kr", errors="ignore")
+        buffer = io.BytesIO()
+        
+        result_df.to_excel(buffer, index=False)
+        xlsx_bytes = buffer.getvalue()
 
         st.download_button(
-            label="결과 CSV 다운로드(EUC-KR)",
-            data=csv_bytes,
-            file_name="business_check_results.csv",
-            mime="text/csv"
+            label="결과 xlsx 다운로드(EUC-KR)",
+            data=xlsx_bytes,
+            file_name="business_check_results.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
 st.markdown("---")
